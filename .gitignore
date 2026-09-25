@@ -1,0 +1,24 @@
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment and secrets
+.env
+*.env
+*credential*
+*.secret
+
+# Backups & scratch
+*.bak
+*.bak.*
+scratch/
+
+# Logs & temp
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+triage_results.csv

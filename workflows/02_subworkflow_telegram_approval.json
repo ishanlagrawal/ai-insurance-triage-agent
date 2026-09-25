@@ -1,0 +1,420 @@
+{
+  "id": "InsTriageSubWf02",
+  "name": "Insurance Triage - 02 Telegram Approval Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "insurance-triage-approval-callback",
+        "options": {}
+      },
+      "id": "telegram-webhook-trigger-id",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        -600,
+        300
+      ],
+      "webhookId": "insurance-triage-approval-callback"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first()?.json || {};\nconst headers = item.headers || {};\nconst incomingToken = String(headers['x-telegram-bot-api-secret-token'] || '');\nconst expectedToken = String($env.TELEGRAM_WEBHOOK_SECRET || '');\n\n// Constant verification\nif (!expectedToken || !incomingToken || incomingToken !== expectedToken) {\n  return [];\n}\n\nreturn [item];"
+      },
+      "id": "verify-telegram-token-id",
+      "name": "Verify Secret Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first()?.json || {};\nconst payload = item.body || item;\nconst cb = payload.callback_query || item.callback_query;\n\nif (!cb || !cb.data) {\n  return [{\n    json: {\n      valid: false,\n      reason: 'No callback_query found'\n    }\n  }];\n}\n\nconst rawData = String(cb.data).trim();\nlet action = '';\nlet messageId = '';\n\nif (rawData.startsWith('APP:')) {\n  action = 'APPROVE';\n  messageId = rawData.substring(4).trim();\n} else if (rawData.startsWith('REJ:')) {\n  action = 'REJECT';\n  messageId = rawData.substring(4).trim();\n}\n\nif (!action || !messageId) {\n  return [{\n    json: {\n      valid: false,\n      reason: `Unrecognized callback_data: ${rawData}`\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    valid: true,\n    action: action,\n    message_id: messageId,\n    callback_query_id: cb.id,\n    telegram_message_id: cb.message?.message_id,\n    telegram_chat_id: String(cb.message?.chat?.id || ''),\n    original_text: cb.message?.text || '',\n    sidecar_payload: {\n      message_id: messageId,\n      action: action,\n      telegram_message_id: cb.message?.message_id,\n      telegram_chat_id: String(cb.message?.chat?.id || '')\n    }\n  }\n}];"
+      },
+      "id": "parse-callback-query-id",
+      "name": "Parse Callback Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-valid-callback-id",
+      "name": "Is Valid Callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/triage/approve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message_id: $json.message_id, action: $json.action, telegram_message_id: $json.telegram_message_id, telegram_chat_id: $json.telegram_chat_id }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "sidecar-approve-api-id",
+      "name": "Sidecar Approve API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sidecarResult = $input.first()?.json || {};\nconst parseNode = $('Parse Callback Query')?.first()?.json || {};\n\nconst action = parseNode.action;\nconst originalText = parseNode.original_text || '';\nconst currentReplyStatus = sidecarResult.current_reply_status || '';\n\nlet banner = '';\nif (sidecarResult.status === 'noop' && currentReplyStatus === 'SENT') {\n  banner = `\u2705 Already SENT`;\n} else if (sidecarResult.status === 'noop') {\n  banner = `\u23f3 Approved \u2014 Dispatching reply via SMTP...`;\n} else if (action === 'APPROVE') {\n  banner = '\u23f3 Approved \u2014 Dispatching reply via SMTP...';\n} else if (action === 'REJECT') {\n  banner = '\u274c Rejected \u2014 Escalated to Desk';\n}\n\nreturn [{\n  json: {\n    callback_query_id: parseNode.callback_query_id,\n    telegram_chat_id: parseNode.telegram_chat_id,\n    telegram_message_id: parseNode.telegram_message_id,\n    message_id: parseNode.message_id,\n    action: action,\n    sidecar_status: sidecarResult.status,\n    current_approval_status: sidecarResult.current_approval_status || '',\n    current_reply_status: currentReplyStatus,\n    banner: banner,\n    original_text: originalText\n  }\n}];"
+      },
+      "id": "format-decision-id",
+      "name": "Format Decision & Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{ $json.callback_query_id }}",
+        "additionalFields": {
+          "text": "={{ $json.banner }}"
+        }
+      },
+      "id": "telegram-answer-callback-id",
+      "name": "Telegram Answer Callback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        540,
+        60
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_N8N_TELEGRAM_CRED_ID",
+          "name": "Telegram Insurance Triage Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c_approve",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "APPROVE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "c_not_sent",
+              "leftValue": "={{ $json.current_reply_status }}",
+              "rightValue": "SENT",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-approved-id",
+      "name": "Is Approved Action?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first()?.json || {};\nconst originalText = item.original_text || '';\nconst timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';\n\nlet stamp = '';\nif (item.sidecar_status === 'noop') {\n  stamp = `\\n\\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\\n\u26a0\ufe0f ALREADY RESOLVED: ${item.current_approval_status || 'PROCESSED'}`;\n} else if (item.action === 'REJECT') {\n  stamp = `\\n\\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\\n\u274c REJECTED by Reviewer (${timestamp})\\nStatus: Escalated to Desk (escalation_needed: 1)`;\n}\n\nreturn [{\n  json: {\n    telegram_chat_id: item.telegram_chat_id,\n    telegram_message_id: item.telegram_message_id,\n    updated_card_text: originalText + stamp\n  }\n}];"
+      },
+      "id": "format-terminal-card-id",
+      "name": "Format Terminal Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "editMessageText",
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "messageId": "={{ $json.telegram_message_id }}",
+        "text": "={{ $json.updated_card_text }}"
+      },
+      "id": "telegram-edit-card-terminal-id",
+      "name": "Telegram Edit Card (Terminal)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1000,
+        420
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_N8N_TELEGRAM_CRED_ID",
+          "name": "Telegram Insurance Triage Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/triage/dispatch-email",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message_id: $json.message_id }) }}"
+      },
+      "id": "dispatch-email-api-id",
+      "name": "Dispatch Approved Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        200
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const dispatchRes = $input.first()?.json || {};\nconst prev = $('Format Decision & Context')?.first()?.json || {};\nconst originalText = prev.original_text || '';\nconst timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';\n\nlet stamp = '';\nif (dispatchRes.status === 'success' || dispatchRes.reply_status === 'SENT') {\n  stamp = `\\n\\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\\n\u2705 APPROVED & SENT by Reviewer (${timestamp})\\nStatus: Reply Dispatched via SMTP (reply_status: SENT)`;\n} else {\n  const errMsg = dispatchRes.detail || dispatchRes.message || 'SMTP transmission failed';\n  stamp = `\\n\\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\\n\u26a0\ufe0f APPROVED by Reviewer (${timestamp})\\nStatus: SMTP DISPATCH FAILED (reply_status: NOT_SENT)\\nError: ${errMsg}`;\n}\n\nreturn [{\n  json: {\n    telegram_chat_id: prev.telegram_chat_id,\n    telegram_message_id: prev.telegram_message_id,\n    updated_card_text: originalText + stamp\n  }\n}];"
+      },
+      "id": "format-post-dispatch-card-id",
+      "name": "Format Post-Dispatch Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "editMessageText",
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "messageId": "={{ $json.telegram_message_id }}",
+        "text": "={{ $json.updated_card_text }}"
+      },
+      "id": "telegram-edit-card-dispatch-id",
+      "name": "Telegram Edit Card (Dispatch Result)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1220,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_N8N_TELEGRAM_CRED_ID",
+          "name": "Telegram Insurance Triage Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Verify Secret Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Secret Token": {
+      "main": [
+        [
+          {
+            "node": "Parse Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Callback Query": {
+      "main": [
+        [
+          {
+            "node": "Is Valid Callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid Callback?": {
+      "main": [
+        [
+          {
+            "node": "Sidecar Approve API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sidecar Approve API": {
+      "main": [
+        [
+          {
+            "node": "Format Decision & Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Decision & Context": {
+      "main": [
+        [
+          {
+            "node": "Telegram Answer Callback",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Approved Action?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Approved Action?": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Approved Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Terminal Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Terminal Card": {
+      "main": [
+        [
+          {
+            "node": "Telegram Edit Card (Terminal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Approved Email": {
+      "main": [
+        [
+          {
+            "node": "Format Post-Dispatch Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Post-Dispatch Card": {
+      "main": [
+        [
+          {
+            "node": "Telegram Edit Card (Dispatch Result)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

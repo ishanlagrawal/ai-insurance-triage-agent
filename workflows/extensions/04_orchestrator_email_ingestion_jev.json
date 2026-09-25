@@ -1,0 +1,688 @@
+{
+  "id": "InsTriageOrch04",
+  "name": "Insurance Triage - 04 Email Ingestion & Dispatch Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger-1min-id",
+      "name": "Schedule Trigger (Every 1 Min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://insurance-triage-api:8008/api/v1/inbox/poll-unread?limit=5",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "poll-unread-emails-id",
+      "name": "Poll Unread Emails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first()?.json || {};\nconst emails = resp.emails || [];\n\nif (!emails.length) {\n  return [];\n}\n\nreturn emails.map(e => ({\n  json: {\n    ...e,\n    dedup_payload: {\n      message_id: e.message_id,\n      sender: e.sender,\n      subject: e.subject,\n      received_at: e.received_at\n    }\n  }\n}));"
+      },
+      "id": "split-emails-id",
+      "name": "Split Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/dedup/check",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.dedup_payload }}"
+      },
+      "id": "check-dedup-api-id",
+      "name": "Check & Record Dedup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-not-duplicate-id",
+      "name": "Is Not Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -20,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://insurance-triage-api:8008/api/v1/customer/context?email={{ encodeURIComponent($('Split Emails').item.json.sender) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "get-customer-context-id",
+      "name": "Get Customer Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const splitEmail = $('Split Emails')?.item?.json || {};\nconst custContext = $input.first()?.json || {};\nconst jevGate = $('Jev Insurance Gate')?.first()?.json || {};\n\nconst jevUrgency = jevGate.answers?.urgency_rating?.choice || null;\nconst urgencyMap = { 'CRITICAL': 5, 'HIGH': 4, 'MEDIUM': 3, 'LOW': 1 };\nconst score = jevUrgency ? (urgencyMap[jevUrgency] || null) : null;\n\nreturn [{\n  json: {\n    email_subject: splitEmail.subject || '',\n    email_body: splitEmail.body || '',\n    customer_context: custContext,\n    jev_priority: jevUrgency,\n    jev_urgency_score: score\n  }\n}];"
+      },
+      "id": "prepare-subworkflow-inputs-id",
+      "name": "Prepare Subworkflow Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "InsTriageSubWf01"
+      },
+      "id": "execute-subworkflow-01-id",
+      "name": "Execute Classify & Guardrail SubWf",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.passed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-guardrail-passed-orch-id",
+      "name": "Guardrail Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        740,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const splitEmail = $('Split Emails')?.item?.json || {};\nconst custContext = $('Get Customer Context')?.first()?.json || {};\nconst triageOutput = $input.first()?.json || {};\nconst prepInputs = $('Prepare Subworkflow Inputs')?.first()?.json || {};\n\nconst payload = {\n  message_id: splitEmail.message_id,\n  sender: splitEmail.sender,\n  subject: splitEmail.subject,\n  customer_id: custContext.customer?.id || null,\n  policy_number: custContext.policies?.[0]?.policy_number || null,\n  claim_number: custContext.claims?.[0]?.claim_number || null,\n  category: triageOutput.category || 'General',\n  intent: triageOutput.intent || 'GENERAL_QUERY',\n  priority: triageOutput.priority || 'Low',\n  urgency_score: prepInputs.jev_urgency_score || triageOutput.urgency_score || 1,\n  sentiment: triageOutput.sentiment || 'Neutral',\n  escalation_needed: triageOutput.escalation_needed || 0,\n  summary: triageOutput.summary || '',\n  suggested_reply: triageOutput.suggested_reply || '',\n  routed_to: triageOutput.routed_to || 'Claims Desk',\n  guardrail_status: 'PASSED',\n  rejection_reason: null,\n  approval_status: 'PENDING',\n  reply_status: 'NOT_SENT'\n};\n\nreturn [{\n  json: {\n    ...triageOutput,\n    payload: payload\n  }\n}];"
+      },
+      "id": "format-pending-payload-id",
+      "name": "Format Pending Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/triage/log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "log-pending-triage-id",
+      "name": "Log Pending Triage (Passed Guardrail)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const subWf = $('Execute Classify & Guardrail SubWf')?.first()?.json || {};\nconst email = $('Split Emails')?.item?.json || {};\nconst cust = $('Get Customer Context')?.first()?.json || {};\nconst logResp = $('Log Pending Triage (Passed Guardrail)')?.first()?.json || {};\n\nconst custName = cust.customer?.full_name || 'UNIDENTIFIED SENDER';\nconst custEmail = email.sender || 'Unknown';\nconst polNum = cust.policies?.[0]?.policy_number || 'N/A';\nconst clmNum = cust.claims?.[0]?.claim_number || 'N/A';\nconst msgId = email.message_id;\nconst triageRef = String(logResp.id || msgId);\n\nconst cardText = `\ud83d\udee1\ufe0f *NEW INCOMING INSURANCE TRIAGE (HUMAN REVIEW)*\\n` +\n`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\\n` +\n`\ud83d\udc64 *Customer:* ${custName} (${custEmail})\\n` +\n`\ud83d\udcc4 *Policy:* ${polNum} | \ud83c\udff7\ufe0f *Claim:* ${clmNum}\\n\\n` +\n`\ud83c\udfaf *Intent:* ${subWf.intent || 'UNKNOWN'}\\n` +\n`\ud83d\udcc1 *Category:* ${subWf.category || 'General'} | \ud83d\udea8 *Priority:* ${subWf.priority || 'Medium'} (${subWf.urgency_score || 1}/5)\\n` +\n`\ud83d\udcac *Sentiment:* ${subWf.sentiment || 'Neutral'} | \ud83c\udfe2 *Desk:* ${subWf.routed_to || 'Support'}\\n\\n` +\n`\ud83d\udcdd *Subject:* ${email.subject || 'No Subject'}\\n\\n` +\n`\ud83d\udccb *AI Summary:*\\n${subWf.summary || 'No summary provided.'}\\n\\n` +\n`\ud83d\udcac *Suggested Reply (Grounding Verified: \u2705 PASSED):*\\n\\\"${subWf.suggested_reply || ''}\\\"\\n\\n` +\n`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\\n` +\n`_Review draft carefully. Approve sends reply via SMTP immediately._`;\n\nreturn [{\n  json: {\n    message_id: msgId,\n    triage_ref: triageRef,\n    card_text: cardText\n  }\n}];"
+      },
+      "id": "build-telegram-card-id",
+      "name": "Build Telegram Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.card_text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        },
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "\u2705 Approve & Send",
+                    "additionalFields": {
+                      "callback_data": "=APP:{{ $json.triage_ref }}"
+                    }
+                  },
+                  {
+                    "text": "\u274c Reject",
+                    "additionalFields": {
+                      "callback_data": "=REJ:{{ $json.triage_ref }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "send-telegram-approval-card-id",
+      "name": "Send Telegram Approval Card",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_N8N_TELEGRAM_CRED_ID",
+          "name": "Telegram Insurance Triage Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const telResp = $input.first()?.json || {};\nconst buildCard = $('Build Telegram Card')?.first()?.json || {};\nconst splitEmail = $('Split Emails')?.item?.json || {};\n\nconst telMsgId = telResp.message_id || telResp.result?.message_id;\nconst telChatId = String(telResp.chat?.id || telResp.result?.chat?.id || $env.TELEGRAM_CHAT_ID || '');\nconst msgId = buildCard.message_id || splitEmail.message_id;\n\nreturn [{\n  json: {\n    message_id: msgId,\n    telegram_message_id: telMsgId,\n    telegram_chat_id: telChatId\n  }\n}];"
+      },
+      "id": "format-meta-payload-id",
+      "name": "Format Meta Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/triage/update-telegram-meta",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "update-telegram-meta-id",
+      "name": "Update Telegram Meta in DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1940,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const splitEmail = $('Split Emails')?.item?.json || {};\nconst custContext = $('Get Customer Context')?.first()?.json || {};\nconst triageOutput = $input.first()?.json || {};\nconst prepInputs = $('Prepare Subworkflow Inputs')?.first()?.json || {};\n\nconst payload = {\n  message_id: splitEmail.message_id,\n  sender: splitEmail.sender,\n  subject: splitEmail.subject,\n  customer_id: custContext.customer?.id || null,\n  policy_number: custContext.policies?.[0]?.policy_number || null,\n  claim_number: custContext.claims?.[0]?.claim_number || null,\n  category: triageOutput.category || 'General',\n  intent: triageOutput.intent || 'GENERAL_QUERY',\n  priority: triageOutput.priority || 'Low',\n  urgency_score: prepInputs.jev_urgency_score || triageOutput.urgency_score || 1,\n  sentiment: triageOutput.sentiment || 'Neutral',\n  escalation_needed: 1,\n  summary: triageOutput.summary || '',\n  suggested_reply: '',\n  routed_to: triageOutput.routed_to || 'Human Desk',\n  guardrail_status: 'REJECTED',\n  rejection_reason: triageOutput.rejection_reason || 'Guardrail failed',\n  approval_status: 'AUTO_ESCALATED',\n  reply_status: 'SUPPRESSED'\n};\n\nreturn [{\n  json: {\n    ...triageOutput,\n    payload: payload\n  }\n}];"
+      },
+      "id": "format-escalated-payload-id",
+      "name": "Format Escalated Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/triage/log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "log-rejected-triage-id",
+      "name": "Log Escalated Triage (Failed Guardrail)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        360
+      ]
+    },
+    {
+      "id": "jev-gate-01",
+      "name": "Jev Insurance Gate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -680,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.typesafe.ai/v1/systemone",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.JEV_API_KEY || $env.TYPESAFE_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'jev-latest',\n  state: 'Subject: ' + ($('Split Emails').item.json.subject || '') + '\\nFrom: ' + ($('Split Emails').item.json.sender || '') + '\\nBody excerpt: ' + (($('Split Emails').item.json.body || '').substring(0, 200)),\n  questions: {\n    is_insurance: {\n      type: 'choice',\n      instructions: 'Is this email related to insurance services (such as policy queries, claims, roadside assistance, breakdown towing, renewals, quotes, or complaints)? If the subject or body mentions policy numbers (POL-...), claims (CLM-...), roadside assistance, or motor insurance, choose yes.',\n      criteria: {\n        yes: 'The email is about insurance services, roadside assistance, policy queries, or claims',\n        no: 'The email is clearly unrelated to insurance (promotional ads, social media, OTP, delivery alerts, non-insurance spam)'\n      }\n    },\n    urgency_rating: {\n      type: 'choice',\n      instructions: 'Rate the urgency of this insurance request based on customer impact.',\n      criteria: {\n        CRITICAL: 'Immediate emergency (vehicle stalled on highway, accident, towing request)',\n        HIGH: 'Time-sensitive issue (policy renewal expiring today, claim payment dispute)',\n        MEDIUM: 'Standard operational query (claim status update, document request)',\n        LOW: 'General inquiry, policy quote request, non-urgent feedback'\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notes": "JEV GATE: Filters non-insurance emails before LLM pipeline. Hard-wired node in workflow. Rollback: restore 04_orchestrator_email_ingestion.json.bak or remove node."
+    },
+    {
+      "id": "jev-if-01",
+      "name": "Is Insurance Email? (Jev)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "jev-cond-01",
+              "leftValue": "={{ $json.error || !$json.answers ? 'yes' : ($json.answers.is_insurance?.choice || 'no') }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "true=yes -> proceed to pipeline. false=no/uncertain -> skip."
+    },
+    {
+      "id": "jev-skip-01",
+      "name": "Mark Skipped (Non-Insurance)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        620
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://insurance-triage-api:8008/api/v1/triage/skip-email",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  message_id: $('Split Emails').item.json.message_id,\n  sender: $('Split Emails').item.json.sender,\n  subject: $('Split Emails').item.json.subject,\n  status: 'Ignored',\n  jev_choice: $('Jev Insurance Gate').first().json.answers?.is_insurance?.choice || 'no',\n  jev_confidence: $('Jev Insurance Gate').first().json.answers?.is_insurance?.confidence || 1.0\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notes": "Writes Ignored status to processed_emails. No triage_results row created. Pipeline terminates here."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Every 1 Min)": {
+      "main": [
+        [
+          {
+            "node": "Poll Unread Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Unread Emails": {
+      "main": [
+        [
+          {
+            "node": "Split Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check & Record Dedup": {
+      "main": [
+        [
+          {
+            "node": "Is Not Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Not Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Jev Insurance Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Customer Context": {
+      "main": [
+        [
+          {
+            "node": "Prepare Subworkflow Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Subworkflow Inputs": {
+      "main": [
+        [
+          {
+            "node": "Execute Classify & Guardrail SubWf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Classify & Guardrail SubWf": {
+      "main": [
+        [
+          {
+            "node": "Guardrail Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail Passed?": {
+      "main": [
+        [
+          {
+            "node": "Format Pending Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Escalated Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Pending Payload": {
+      "main": [
+        [
+          {
+            "node": "Log Pending Triage (Passed Guardrail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Pending Triage (Passed Guardrail)": {
+      "main": [
+        [
+          {
+            "node": "Build Telegram Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Telegram Card": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Approval Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Approval Card": {
+      "main": [
+        [
+          {
+            "node": "Format Meta Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Meta Payload": {
+      "main": [
+        [
+          {
+            "node": "Update Telegram Meta in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Escalated Payload": {
+      "main": [
+        [
+          {
+            "node": "Log Escalated Triage (Failed Guardrail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Emails": {
+      "main": [
+        [
+          {
+            "node": "Check & Record Dedup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jev Insurance Gate": {
+      "main": [
+        [
+          {
+            "node": "Is Insurance Email? (Jev)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Insurance Email? (Jev)": {
+      "main": [
+        [
+          {
+            "node": "Get Customer Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Skipped (Non-Insurance)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

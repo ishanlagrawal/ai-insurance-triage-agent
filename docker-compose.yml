@@ -1,0 +1,22 @@
+services:
+  insurance-triage-api:
+    build: .
+    container_name: insurance-triage-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8008:8008"
+    volumes:
+      - ./db:/app/db
+      - ./api:/app/api
+      - ./triage_results.csv:/app/triage_results.csv
+    env_file:
+      - /docker/.env
+    networks:
+      - default
+      - hermes_net
+
+networks:
+  default:
+  hermes_net:
+    name: hermes-agent-p5vk_default
+    external: true

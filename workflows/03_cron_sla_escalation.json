@@ -1,0 +1,184 @@
+{
+  "id": "InsTriageCronSLA03",
+  "name": "Insurance Triage - 03 SLA Auto-Escalation Cron",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger-id-03",
+      "name": "Schedule Trigger (Every 15 Min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-600, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://insurance-triage-api:8008/api/v1/triage/pending-expired?hours=4",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "sidecar-get-expired-id",
+      "name": "Sidecar Get Expired",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-360, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first()?.json || {};\nconst records = resp.records || [];\n\nif (!records.length) {\n  return [];\n}\n\nreturn records.map(r => ({\n  json: {\n    ...r,\n    sidecar_payload: {\n      message_id: r.message_id,\n      action: 'AUTO_ESCALATE',\n      telegram_message_id: r.telegram_message_id,\n      telegram_chat_id: r.telegram_chat_id\n    }\n  }\n}));"
+      },
+      "id": "split-records-id",
+      "name": "Split Records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/triage/approve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.sidecar_payload }}"
+      },
+      "id": "sidecar-auto-escalate-id",
+      "name": "Sidecar Auto-Escalate API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ Boolean($json.telegram_message_id && $json.telegram_chat_id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-telegram-id",
+      "name": "Has Telegram Message ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [360, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "editMessageText",
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "messageId": "={{ $json.telegram_message_id }}",
+        "text": "={{ '⚠️ [AUTO-ESCALATED: 4-Hour SLA Expired]\\n\\nRef ID: ' + $json.message_id + '\\nStatus: Escalated to Grievance Desk (escalation_needed: 1, reply_status: SUPPRESSED)' }}"
+      },
+      "id": "telegram-edit-expired-card-id",
+      "name": "Telegram Edit Expired Card",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [600, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_N8N_TELEGRAM_CRED_ID",
+          "name": "Telegram Insurance Triage Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Every 15 Min)": {
+      "main": [
+        [
+          {
+            "node": "Sidecar Get Expired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sidecar Get Expired": {
+      "main": [
+        [
+          {
+            "node": "Split Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Records": {
+      "main": [
+        [
+          {
+            "node": "Sidecar Auto-Escalate API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sidecar Auto-Escalate API": {
+      "main": [
+        [
+          {
+            "node": "Has Telegram Message ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Telegram Message ID?": {
+      "main": [
+        [
+          {
+            "node": "Telegram Edit Expired Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

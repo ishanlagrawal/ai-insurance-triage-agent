@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Insurance Support & Claims Triage | Operations Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --border-color: #e2e8f0;
+      --border-subtle: #f1f5f9;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --text-subtle: #94a3b8;
+      --primary: #1e3a8a;
+      --primary-hover: #1e40af;
+      --accent-blue: #2563eb;
+      --accent-blue-subtle: #eff6ff;
+      --critical-red: #dc2626;
+      --critical-bg: #fef2f2;
+      --warning-amber: #d97706;
+      --warning-bg: #fffbeb;
+      --success-green: #16a34a;
+      --success-bg: #f0fdf4;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Top Navigation Bar ────────────────────────────────────────── */
+    header {
+      background-color: var(--bg-card);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0.85rem 1.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-logo {
+      width: 28px;
+      height: 28px;
+      background: var(--primary);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    .brand-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .brand-badge {
+      font-size: 0.72rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      background-color: var(--accent-blue-subtle);
+      color: var(--accent-blue);
+      font-weight: 600;
+      margin-left: 0.4rem;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .live-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--success-green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.82rem;
+      font-weight: 500;
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background-color: var(--bg-card);
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn:hover {
+      background-color: var(--border-subtle);
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .btn-primary:hover {
+      background-color: var(--primary-hover);
+    }
+
+    /* ─── Main Container ────────────────────────────────────────────── */
+    main {
+      padding: 1.75rem;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ─── KPI Section ───────────────────────────────────────────────── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.75rem;
+    }
+
+    .kpi-card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1.1rem 1.25rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .kpi-label {
+      font-size: 0.76rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .kpi-value {
+      font-size: 1.65rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+
+    .kpi-trend {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    /* ─── Table Controls & Filter Toolbar ───────────────────────────── */
+    .table-container {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+
+    .table-toolbar {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .search-filter-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex: 1;
+    }
+
+    .search-input {
+      font-family: inherit;
+      font-size: 0.82rem;
+      padding: 0.45rem 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      width: 280px;
+      color: var(--text-main);
+      background-color: #fff;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 2px var(--accent-blue-subtle);
+    }
+
+    .filter-select {
+      font-family: inherit;
+      font-size: 0.82rem;
+      padding: 0.45rem 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-main);
+      background-color: #fff;
+      cursor: pointer;
+    }
+
+    /* ─── Data Table ────────────────────────────────────────────────── */
+    .table-responsive {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.82rem;
+    }
+
+    thead th {
+      background-color: #f8fafc;
+      padding: 0.65rem 1.1rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border-subtle);
+      transition: background-color 0.1s ease;
+      cursor: pointer;
+    }
+
+    tbody tr:hover {
+      background-color: #f8fafc;
+    }
+
+    tbody td {
+      padding: 0.75rem 1.1rem;
+      color: var(--text-main);
+      vertical-align: middle;
+    }
+
+    .cell-subject {
+      font-weight: 500;
+      max-width: 280px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cell-sender {
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+
+    /* ─── Badges ────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.18rem 0.55rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .badge-critical {
+      background-color: var(--critical-bg);
+      color: var(--critical-red);
+      border: 1px solid #fecaca;
+    }
+
+    .badge-high {
+      background-color: var(--warning-bg);
+      color: var(--warning-amber);
+      border: 1px solid #fde68a;
+    }
+
+    .badge-medium {
+      background-color: #f1f5f9;
+      color: #475569;
+      border: 1px solid #e2e8f0;
+    }
+
+    .badge-low {
+      background-color: #f8fafc;
+      color: #64748b;
+      border: 1px solid #e2e8f0;
+    }
+
+    .badge-success {
+      background-color: var(--success-bg);
+      color: var(--success-green);
+      border: 1px solid #bbf7d0;
+    }
+
+    .badge-outline {
+      background-color: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
+
+    /* ─── Slide-out Detail Drawer ───────────────────────────────────── */
+    .drawer-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(15, 23, 42, 0.25);
+      z-index: 50;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.25s ease;
+    }
+
+    .drawer-overlay.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: -620px;
+      width: 600px;
+      height: 100%;
+      background-color: var(--bg-card);
+      border-left: 1px solid var(--border-color);
+      box-shadow: -4px 0 24px -4px rgba(0, 0, 0, 0.12);
+      z-index: 60;
+      display: flex;
+      flex-direction: column;
+      transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .drawer.active {
+      right: 0;
+    }
+
+    .drawer-header {
+      padding: 1.15rem 1.5rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .drawer-title {
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .drawer-close {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 1.25rem;
+      padding: 0.25rem;
+    }
+
+    .drawer-body {
+      padding: 1.5rem;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .drawer-section {
+      background-color: #f8fafc;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 1rem 1.15rem;
+    }
+
+    .drawer-section-title {
+      font-size: 0.74rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      padding: 0.3rem 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .info-row:last-child {
+      border-bottom: none;
+    }
+
+    .info-label {
+      color: var(--text-muted);
+    }
+
+    .info-value {
+      font-weight: 500;
+      color: var(--text-main);
+      text-align: right;
+    }
+
+    .reply-box {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      background-color: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.85rem;
+      color: #334155;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+
+    .empty-state {
+      padding: 3rem;
+      text-align: center;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand">
+      <div class="brand-logo">A</div>
+      <div class="brand-title">Insurance Support & Claims Triage</div>
+      <span class="brand-badge">Ops Console</span>
+    </div>
+    <div class="header-actions">
+      <div class="live-indicator">
+        <span class="pulse-dot"></span>
+        <span>Engine Active (1m Polling)</span>
+      </div>
+      <button class="btn" onclick="fetchData()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- KPI Section (Step 18 & 19 Specification) -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Claims & Inquiries</div>
+        <div class="kpi-value" id="kpi-total">0</div>
+        <div class="kpi-trend">All ingested email tickets</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Critical & Emergencies</div>
+        <div class="kpi-value" id="kpi-critical" style="color: var(--critical-red);">0</div>
+        <div class="kpi-trend">Accidents, delays, fraud alerts</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Human Escalations</div>
+        <div class="kpi-value" id="kpi-escalated" style="color: var(--warning-amber);">0</div>
+        <div class="kpi-trend">Pending approval / flagged</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Auto-Replied</div>
+        <div class="kpi-value" id="kpi-replied" style="color: var(--success-green);">0</div>
+        <div class="kpi-trend">Grounded & guardrail verified</div>
+      </div>
+    </section>
+
+    <!-- Support & Claims Queue Table -->
+    <section class="table-container">
+      <div class="table-toolbar">
+        <div class="search-filter-group">
+          <input type="text" id="searchInput" class="search-input" placeholder="Search by subject, sender, policy..." oninput="filterData()">
+          <select id="priorityFilter" class="filter-select" onchange="filterData()">
+            <option value="">All Priorities</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+          <select id="guardrailFilter" class="filter-select" onchange="filterData()">
+            <option value="">All Guardrail States</option>
+            <option value="PASSED">Passed</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="PENDING">Pending</option>
+          </select>
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);" id="tableCountSummary">
+          Showing 0 items
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Priority</th>
+              <th>Score</th>
+              <th>Insurance Intent</th>
+              <th>Sender</th>
+              <th>Subject</th>
+              <th>Guardrails</th>
+              <th>Routing Desk</th>
+              <th>Reply Status</th>
+            </tr>
+          </thead>
+          <tbody id="triageTableBody">
+            <tr>
+              <td colspan="9" class="empty-state">No triage records found. Start the n8n ingestion workflow or send test emails.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Right-side Detail Drawer -->
+  <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+  <aside class="drawer" id="detailDrawer">
+    <div class="drawer-header">
+      <div>
+        <div class="drawer-title" id="drawerTitle">Triage Details</div>
+        <div style="font-size: 0.75rem; color: var(--text-muted);" id="drawerSubtitle">Message ID</div>
+      </div>
+      <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body">
+      
+      <!-- Classification & Routing -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">AI Classification & Risk</div>
+        <div class="info-row"><span class="info-label">Intent</span><span class="info-value" id="drawerIntent">-</span></div>
+        <div class="info-row"><span class="info-label">Category</span><span class="info-value" id="drawerCategory">-</span></div>
+        <div class="info-row"><span class="info-label">Priority / Urgency</span><span class="info-value" id="drawerPriority">-</span></div>
+        <div class="info-row"><span class="info-label">Assigned Desk</span><span class="info-value" id="drawerDesk">-</span></div>
+      </div>
+
+      <!-- Customer & Grounded Policy Context -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Grounded SQLite Context</div>
+        <div class="info-row"><span class="info-label">Customer ID</span><span class="info-value" id="drawerCustId">-</span></div>
+        <div class="info-row"><span class="info-label">Policy Number</span><span class="info-value" id="drawerPolicyNo">-</span></div>
+        <div class="info-row"><span class="info-label">Claim Number</span><span class="info-value" id="drawerClaimNo">-</span></div>
+      </div>
+
+      <!-- Guardrail Safety Check -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Hallucination Guardrail</div>
+        <div class="info-row"><span class="info-label">Status</span><span class="info-value" id="drawerGuardrailStatus">-</span></div>
+        <div class="info-row"><span class="info-label">Approval Gate</span><span class="info-value" id="drawerApproval">-</span></div>
+        <div class="info-row" id="drawerRejectRow" style="display:none;"><span class="info-label">Rejection Reason</span><span class="info-value" id="drawerRejectReason" style="color: var(--critical-red);">-</span></div>
+      </div>
+
+      <!-- Executive Summary -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Inquiry Summary</div>
+        <div style="font-size: 0.82rem; color: var(--text-main);" id="drawerSummary">-</div>
+      </div>
+
+      <!-- Suggested Reply -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Generated Reply</div>
+        <div class="reply-box" id="drawerReply">-</div>
+      </div>
+
+    </div>
+  </aside>
+
+  <script>
+    let allRecords = [];
+
+    async function fetchData() {
+      try {
+        const [statsRes, listRes] = await Promise.all([
+          fetch('/api/v1/stats'),
+          fetch('/api/v1/triage/list')
+        ]);
+        
+        if (statsRes.ok) {
+          const stats = await statsRes.json();
+          document.getElementById('kpi-total').textContent = stats.total_inquiries || 0;
+          document.getElementById('kpi-critical').textContent = stats.critical_emergencies || 0;
+          document.getElementById('kpi-escalated').textContent = stats.human_escalations || 0;
+          document.getElementById('kpi-replied').textContent = stats.auto_replied || 0;
+        }
+
+        if (listRes.ok) {
+          allRecords = await listRes.json();
+          filterData();
+        }
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+      }
+    }
+
+    function renderTable(records) {
+      const tbody = document.getElementById('triageTableBody');
+      document.getElementById('tableCountSummary').textContent = `Showing ${records.length} items`;
+
+      if (records.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No matching triage records found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = records.map(r => {
+        let pClass = 'badge-medium';
+        if (r.priority === 'Critical') pClass = 'badge-critical';
+        else if (r.priority === 'High') pClass = 'badge-high';
+        else if (r.priority === 'Low') pClass = 'badge-low';
+
+        let gClass = 'badge-outline';
+        if (r.guardrail_status === 'PASSED') gClass = 'badge-success';
+        else if (r.guardrail_status === 'REJECTED') gClass = 'badge-critical';
+
+        let rClass = 'badge-outline';
+        if (r.reply_status === 'SENT') rClass = 'badge-success';
+        else if (r.reply_status === 'FAILED') rClass = 'badge-critical';
+
+        return `
+          <tr onclick="openDrawer(${r.id})">
+            <td style="font-weight: 600; color: var(--text-muted);">#${r.id}</td>
+            <td><span class="badge ${pClass}">${r.priority}</span></td>
+            <td style="font-weight: 600;">${r.urgency_score}/5</td>
+            <td style="font-weight: 600; color: var(--primary);">${r.intent || 'GENERAL_QUERY'}</td>
+            <td class="cell-sender">${escapeHtml(r.sender)}</td>
+            <td class="cell-subject">${escapeHtml(r.subject)}</td>
+            <td><span class="badge ${gClass}">${r.guardrail_status}</span></td>
+            <td>${escapeHtml(r.routed_to || 'Claims Desk')}</td>
+            <td><span class="badge ${rClass}">${r.reply_status}</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function filterData() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const priority = document.getElementById('priorityFilter').value;
+      const guardrail = document.getElementById('guardrailFilter').value;
+
+      const filtered = allRecords.filter(r => {
+        const matchQ = !q || (
+          (r.subject && r.subject.toLowerCase().includes(q)) ||
+          (r.sender && r.sender.toLowerCase().includes(q)) ||
+          (r.intent && r.intent.toLowerCase().includes(q)) ||
+          (r.policy_number && r.policy_number.toLowerCase().includes(q))
+        );
+        const matchP = !priority || r.priority === priority;
+        const matchG = !guardrail || r.guardrail_status === guardrail;
+        return matchQ && matchP && matchG;
+      });
+
+      renderTable(filtered);
+    }
+
+    function openDrawer(id) {
+      const record = allRecords.find(r => r.id === id);
+      if (!record) return;
+
+      document.getElementById('drawerTitle').textContent = record.subject || 'Inquiry Details';
+      document.getElementById('drawerSubtitle').textContent = `ID #${record.id} • ${record.sender}`;
+      document.getElementById('drawerIntent').textContent = record.intent;
+      document.getElementById('drawerCategory').textContent = record.category;
+      document.getElementById('drawerPriority').textContent = `${record.priority} (Score: ${record.urgency_score}/5)`;
+      document.getElementById('drawerDesk').textContent = record.routed_to || 'Claims Desk';
+
+      document.getElementById('drawerCustId').textContent = record.customer_id || 'Unidentified';
+      document.getElementById('drawerPolicyNo').textContent = record.policy_number || 'N/A';
+      document.getElementById('drawerClaimNo').textContent = record.claim_number || 'N/A';
+
+      document.getElementById('drawerGuardrailStatus').textContent = record.guardrail_status;
+      document.getElementById('drawerApproval').textContent = record.approval_status;
+
+      const rejectRow = document.getElementById('drawerRejectRow');
+      if (record.rejection_reason) {
+        rejectRow.style.display = 'flex';
+        document.getElementById('drawerRejectReason').textContent = record.rejection_reason;
+      } else {
+        rejectRow.style.display = 'none';
+      }
+
+      document.getElementById('drawerSummary').textContent = record.summary || 'No summary available.';
+      document.getElementById('drawerReply').textContent = record.suggested_reply || 'No draft reply generated.';
+
+      document.getElementById('drawerOverlay').classList.add('active');
+      document.getElementById('detailDrawer').classList.add('active');
+    }
+
+    function closeDrawer() {
+      document.getElementById('drawerOverlay').classList.remove('active');
+      document.getElementById('detailDrawer').classList.remove('active');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Auto-refresh every 10 seconds
+    fetchData();
+    setInterval(fetchData, 10000);
+  </script>
+</body>
+</html>

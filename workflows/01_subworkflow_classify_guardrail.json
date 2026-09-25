@@ -1,0 +1,237 @@
+{
+  "id": "InsTriageSubWf01",
+  "name": "Insurance Triage - 01 Classify & Guardrail",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-subworkflow-id",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-950, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "function sanitize(str, maxLen = 8000) {\n  if (!str) return { text: '', was_truncated: false, original_length: 0 };\n  const raw = String(str);\n  const original_length = raw.length;\n  // Strip control chars, zero-width chars, bidi overrides (preserve \\t, \\n, \\r)\n  const clean = raw.replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F\\u200B-\\u200D\\uFEFF\\u202A-\\u202E\\u2066-\\u2069]/g, '');\n  let finalText = clean;\n  let was_truncated = false;\n  if (clean.length > maxLen) {\n    was_truncated = true;\n    let cut = clean.lastIndexOf(' ', maxLen);\n    if (cut < maxLen * 0.8) cut = maxLen;\n    finalText = clean.substring(0, cut) + '\\n[...TRUNCATED: Message exceeded 8,000 characters...]';\n  }\n  return { text: finalText, was_truncated, original_length };\n}\n\nconst item = $input.first()?.json || {};\nconst subSan = sanitize(item.email_subject, 500);\nconst bodySan = sanitize(item.email_body, 8000);\nconst customerContext = item.customer_context || {};\n\nconst prompt = `You are an enterprise AI Insurance Customer Support & Claims Triage reasoning engine.\n\nINPUT EMAIL:\nSubject: ${subSan.text}\nBody: ${bodySan.text}\n\nRETRIEVED CUSTOMER DATABASE CONTEXT:\n${JSON.stringify(customerContext, null, 2)}\n\nTAXONOMY OF 24 INSURANCE INTENTS & PRIORITIES:\n1. CLAIM_STATUS (High)\n2. NEW_CLAIM (Critical)\n3. CLAIM_DOCUMENTS (High)\n4. CLAIM_DELAY (Critical)\n5. CLAIM_APPROVAL (High)\n6. CLAIM_REJECTION (Critical)\n7. POLICY_DOCUMENT (Medium)\n8. POLICY_DETAILS (Medium)\n9. POLICY_EXPIRY (High)\n10. RENEWAL (High)\n11. RENEWAL_QUOTE (High)\n12. PREMIUM_QUERY (Medium)\n13. POLICY_CHANGE (Medium)\n14. VEHICLE_CHANGE (High)\n15. CANCELLATION (High)\n16. REFUND (High)\n17. PAYMENT (High)\n18. NO_CLAIM_BONUS (Medium)\n19. NETWORK_GARAGE (Medium)\n20. CASHLESS_CLAIM (High)\n21. ROADSIDE_ASSISTANCE (Critical)\n22. INSPECTION (High)\n23. GENERAL_QUERY (Low)\n24. COMPLAINT (Critical)\n25. FRAUD_SUSPICION (Critical)\n\nSTRICT GROUNDING RULES:\n- NEVER invent claim numbers, policy numbers, dates, or rupee amounts not present in the customer context.\n- If customer is unidentified, state that policy records could not be located.\n- Return ONLY a valid JSON object without markdown or markdown code blocks.\n\nREQUIRED JSON SCHEMA:\n{\n  \"category\": \"Claims | Policy | Billing | Roadside | Support\",\n  \"intent\": \"<One of the 24 intents>\",\n  \"priority\": \"Low | Medium | High | Critical\",\n  \"urgency_score\": 1,\n  \"sentiment\": \"Positive | Neutral | Frustrated | Angry\",\n  \"escalation_needed\": 0,\n  \"summary\": \"1-2 sentence summary\",\n  \"suggested_reply\": \"Professional plain-text reply to sender\",\n  \"routed_to\": \"Claims Desk | Underwriting | Billing | Roadside Assist | Grievance Team\"\n}`;\n\nreturn [{\n  json: {\n    inception_payload: {\n      model: \"mercury-2.5\",\n      messages: [{ role: \"user\", content: prompt }],\n      response_format: { type: \"json_object\" },\n      temperature: 0.1\n    },\n    customer_context: customerContext,\n    email_subject: subSan.text,\n    email_body: bodySan.text,\n    was_truncated: bodySan.was_truncated,\n    original_length: bodySan.original_length\n  }\n}];"
+      },
+      "id": "build-prompt-node-id",
+      "name": "Build Prompt & Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.inceptionlabs.ai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INCEPTION_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.inception_payload }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "gemini-classify-node-id",
+      "name": "Gemini 2.5 Flash Classify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputItem = $input.first();\nconst llmData = inputItem.json;\nconst promptData = $('Build Prompt & Payload')?.first()?.json || {};\nconst customerContext = promptData.customer_context || {};\nconst wasTruncated = promptData.was_truncated === true;\nconst originalLength = promptData.original_length || 0;\n\nlet parsed = null;\ntry {\n  const rawText = llmData.choices?.[0]?.message?.content;\n  if (rawText) {\n    const cleaned = rawText.replace(/^```json\\s*/i, '').replace(/```\\s*$/i, '').trim();\n    parsed = JSON.parse(cleaned);\n  }\n} catch (err) {\n  parsed = null;\n}\n\nif (!parsed || !parsed.intent) {\n  let failSummary = \"LLM classification failed or timed out. Defaulted to human review.\";\n  if (wasTruncated) {\n    failSummary += ` [TRUNCATED from ${originalLength} chars]`;\n  }\n  return [{\n    json: {\n      category: \"Support\",\n      intent: \"GENERAL_QUERY\",\n      priority: \"High\",\n      urgency_score: 4,\n      sentiment: \"Neutral\",\n      escalation_needed: 1,\n      summary: failSummary,\n      suggested_reply: \"\",\n      routed_to: \"Grievance Team\",\n      is_llm_failure: true,\n      was_truncated: wasTruncated,\n      original_length: originalLength,\n      customer_context: customerContext,\n      guardrail_payload: {\n        suggested_reply: \"\",\n        customer_context: customerContext\n      }\n    }\n  }];\n}\n\nlet finalSummary = String(parsed.summary || '');\nif (wasTruncated) {\n  finalSummary = `${finalSummary} [TRUNCATED from ${originalLength} chars]`.trim();\n}\n\nconst cleanReply = String(parsed.suggested_reply || '');\nreturn [{\n  json: {\n    category: String(parsed.category || 'Support'),\n    intent: String(parsed.intent || 'GENERAL_QUERY'),\n    priority: String(parsed.priority || 'Medium'),\n    urgency_score: Math.min(5, Math.max(1, parseInt(parsed.urgency_score) || 1)),\n    sentiment: String(parsed.sentiment || 'Neutral'),\n    escalation_needed: parsed.escalation_needed ? 1 : 0,\n    summary: finalSummary,\n    suggested_reply: cleanReply,\n    routed_to: String(parsed.routed_to || 'Claims Desk'),\n    is_llm_failure: false,\n    was_truncated: wasTruncated,\n    original_length: originalLength,\n    customer_context: customerContext,\n    guardrail_payload: {\n      suggested_reply: cleanReply,\n      customer_context: customerContext\n    }\n  }\n}];"
+      },
+      "id": "parse-validate-json-node-id",
+      "name": "Parse & Validate LLM JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://insurance-triage-api:8008/api/v1/guardrails/verify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.guardrail_payload }}"
+      },
+      "id": "sidecar-guardrail-node-id",
+      "name": "Sidecar Guardrail Verify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const llm = $('Parse & Validate LLM JSON')?.first()?.json || {};\nconst guardrail = $input.first()?.json || {};\n\nif (llm.is_llm_failure) {\n  return [{\n    json: {\n      ...llm,\n      guardrail_status: \"REJECTED\",\n      rejection_reason: \"LLM inference failed.\",\n      escalation_needed: 1,\n      passed: false,\n      suggested_reply: \"\"\n    }\n  }];\n}\n\nconst guardrailPassed = guardrail.passed === true;\nconst finalEscalationNeeded = (!guardrailPassed) ? 1 : (llm.escalation_needed ? 1 : 0);\nconst finalSuggestedReply = guardrailPassed ? llm.suggested_reply : \"\";\nconst finalGuardrailStatus = guardrailPassed ? \"PASSED\" : \"REJECTED\";\nconst rejectionReason = guardrailPassed ? null : (guardrail.rejection_reason || \"Ungrounded entities detected\");\n\nreturn [{\n  json: {\n    ...llm,\n    suggested_reply: finalSuggestedReply,\n    guardrail_status: finalGuardrailStatus,\n    rejection_reason: rejectionReason,\n    escalation_needed: finalEscalationNeeded,\n    passed: guardrailPassed,\n    entities_detected: guardrail.entities_detected || {}\n  }\n}];"
+      },
+      "id": "enforce-precedence-node-id",
+      "name": "Enforce Guardrail Precedence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.passed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-guardrail-passed-node-id",
+      "name": "Guardrail Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {},
+      "id": "ready-for-approval-id",
+      "name": "Ready for Approval Gate",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {},
+      "id": "escalate-to-human-id",
+      "name": "Escalate to Human Desk",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [720, 400]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt & Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt & Payload": {
+      "main": [
+        [
+          {
+            "node": "Gemini 2.5 Flash Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 2.5 Flash Classify": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate LLM JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate LLM JSON": {
+      "main": [
+        [
+          {
+            "node": "Sidecar Guardrail Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sidecar Guardrail Verify": {
+      "main": [
+        [
+          {
+            "node": "Enforce Guardrail Precedence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enforce Guardrail Precedence": {
+      "main": [
+        [
+          {
+            "node": "Guardrail Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail Passed?": {
+      "main": [
+        [
+          {
+            "node": "Ready for Approval Gate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate to Human Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
