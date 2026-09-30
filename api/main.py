@@ -4,13 +4,14 @@ Provides SQLite data access, entity context retrieval, idempotency dedup,
 guardrail verification, execution logging, and enterprise dashboard.
 """
 
-import os
 import csv
+import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
-from fastapi import FastAPI, Request, Query, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -41,33 +42,33 @@ class TriageLogRequest(BaseModel):
     message_id: str
     sender: str
     subject: str
-    customer_id: Optional[str] = None
-    policy_number: Optional[str] = None
-    claim_number: Optional[str] = None
+    customer_id: str | None = None
+    policy_number: str | None = None
+    claim_number: str | None = None
     category: str
     intent: str
     priority: str
     urgency_score: int = Field(default=1, ge=1, le=5)
-    sentiment: Optional[str] = "Neutral"
+    sentiment: str | None = "Neutral"
     escalation_needed: int = Field(default=0, ge=0, le=1)
-    summary: Optional[str] = ""
-    suggested_reply: Optional[str] = ""
-    routed_to: Optional[str] = "Customer Support"
+    summary: str | None = ""
+    suggested_reply: str | None = ""
+    routed_to: str | None = "Customer Support"
     guardrail_status: str = "PASSED"
-    rejection_reason: Optional[str] = None
+    rejection_reason: str | None = None
     approval_status: str = "PENDING"
     reply_status: str = "NOT_SENT"
 
 class GuardrailVerifyRequest(BaseModel):
     suggested_reply: str
-    customer_context: Dict[str, Any]
+    customer_context: dict[str, Any]
 
 class TriageApproveRequest(BaseModel):
     message_id: str
     action: str  # 'APPROVE', 'REJECT', 'AUTO_ESCALATE'
-    reviewer_note: Optional[str] = None
-    telegram_message_id: Optional[int] = None
-    telegram_chat_id: Optional[str] = None
+    reviewer_note: str | None = None
+    telegram_message_id: int | None = None
+    telegram_chat_id: str | None = None
 
 # ─── Core API Endpoints ───────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ def health():
         cnt = cur.fetchone()[0]
         conn.close()
         return {"status": "ok", "customers_count": cnt}
-    except Exception as e:
+    except sqlite3.Error as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/dedup/check")
@@ -99,7 +100,7 @@ def check_email_dedup_only(req: DedupRequest):
         if existing:
             return {"duplicate": True, "message_id": req.message_id, "status": existing["status"]}
         return {"duplicate": False, "message_id": req.message_id, "status": "New"}
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -126,7 +127,7 @@ def check_and_record_email(req: DedupRequest):
         mark_gmail_read_by_msgid(req.message_id)
         
         return {"duplicate": False, "message_id": req.message_id, "status": "Recorded"}
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -137,8 +138,8 @@ class SkipEmailRequest(BaseModel):
     sender: str
     subject: str
     status: str = "Ignored"
-    jev_choice: Optional[str] = None
-    jev_confidence: Optional[float] = None
+    jev_choice: str | None = None
+    jev_confidence: float | None = None
 
 @app.post("/api/v1/triage/skip-email")
 def skip_email(req: SkipEmailRequest):
@@ -172,7 +173,7 @@ def skip_email(req: SkipEmailRequest):
             "jev_choice": req.jev_choice,
             "jev_confidence": req.jev_confidence
         }
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -255,11 +256,12 @@ def get_customer_context(email: str = Query(..., description="Customer sender em
             "network_garages": garages,
             "support_tickets": tickets
         }
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
-from api.guardrails import validate_suggested_reply, verify_semantic_grounding_with_jev
+from api.guardrails import verify_semantic_grounding_with_jev
+
 
 @app.post("/api/v1/guardrails/verify")
 def verify_guardrails(req: GuardrailVerifyRequest):
@@ -360,12 +362,12 @@ def log_triage_result(req: TriageLogRequest):
             print(f"Warning: Failed to write to CSV: {csv_err}")
 
         return {"status": "logged", "id": row_id, "message_id": req.message_id}
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/triage/update-telegram-meta")
-def update_telegram_meta(req: Dict[str, Any]):
+def update_telegram_meta(req: dict[str, Any]):
     message_id = req.get("message_id")
     telegram_message_id = req.get("telegram_message_id")
     telegram_chat_id = req.get("telegram_chat_id")
@@ -382,7 +384,7 @@ def update_telegram_meta(req: Dict[str, Any]):
         conn.commit()
         conn.close()
         return {"status": "success", "message_id": message_id}
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -498,7 +500,7 @@ def approve_triage_result(req: TriageApproveRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -518,12 +520,12 @@ def get_pending_expired(hours: float = Query(default=4.0, ge=0.01, description="
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         return {"count": len(rows), "hours_threshold": hours, "records": rows}
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/triage/dispatch-email")
-def dispatch_email(req: Dict[str, Any]):
+def dispatch_email(req: dict[str, Any]):
     message_id = req.get("message_id")
     if not message_id:
         raise HTTPException(status_code=400, detail="message_id is required")
@@ -577,8 +579,8 @@ def dispatch_email(req: Dict[str, Any]):
             server.login(user, pwd)
             server.sendmail(user, [to_email], msg.as_string())
             server.quit()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"SMTP dispatch failed: {str(e)}")
+        except sqlite3.Error as e:
+            raise HTTPException(status_code=500, detail=f"SMTP dispatch failed: {e!s}")
 
         # Update reply_status strictly upon verified SMTP transmission
         cur.execute("""
@@ -615,13 +617,13 @@ def mark_gmail_read_by_msgid(message_id: str):
                 mail.store(mid, '+FLAGS', '\\Seen')
         mail.close()
         mail.logout()
-    except Exception as e:
+    except sqlite3.Error as e:
         print(f"Error marking email read: {e}")
 
 @app.get("/api/v1/inbox/poll-unread")
 def poll_unread_emails(limit: int = 5):
-    import imaplib
     import email
+    import imaplib
     from email.header import decode_header
     
     user = os.getenv("EMAIL_USER")
@@ -719,8 +721,8 @@ def poll_unread_emails(limit: int = 5):
         mail.close()
         mail.logout()
         return {"count": len(results), "emails": results}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"IMAP poll error: {str(e)}")
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"IMAP poll error: {e!s}")
 
 
 @app.get("/api/v1/stats")
@@ -751,7 +753,7 @@ def get_stats():
             "auto_replied": auto_replied,
             "pending_approval": pending_approval
         }
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -764,7 +766,7 @@ def list_triage_results(limit: int = 50):
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         return rows
-    except Exception as e:
+    except sqlite3.Error as e:
         conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
