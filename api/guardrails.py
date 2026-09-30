@@ -1,10 +1,13 @@
-"""
+""""
 Deterministic Hallucination & Fact-Checking Guardrail Engine.
 Validates LLM-generated suggested replies against retrieved SQLite database context.
 """
 
+import json
 import re
-from typing import Dict, Any, Tuple, List
+import urllib.error
+import urllib.request
+from typing import Any
 
 # Regex patterns for insurance domain entities (requires hyphen, underscore, or digit)
 POLICY_REGEX = re.compile(r'\bPOL[-_0-9][A-Za-z0-9_-]*\b', re.IGNORECASE)
@@ -22,7 +25,7 @@ def _parse_amount(val: Any) -> float:
     except (ValueError, TypeError):
         return -1.0
 
-def validate_suggested_reply(suggested_reply: str, customer_context: Dict[str, Any]) -> Tuple[bool, str, Dict[str, List[Any]]]:
+def validate_suggested_reply(suggested_reply: str, customer_context: dict[str, Any]) -> tuple[bool, str, dict[str, list[Any]]]:
     """
     Asserts that all referenced policy numbers, claim numbers, and monetary amounts
     in the suggested reply actually exist within the customer's retrieved database records.
@@ -108,13 +111,11 @@ def validate_suggested_reply(suggested_reply: str, customer_context: Dict[str, A
     return True, "", detected_entities
 
 
-def verify_semantic_grounding_with_jev(suggested_reply: str, customer_context: Dict[str, Any], api_key: str) -> Tuple[bool, str]:
+def verify_semantic_grounding_with_jev(suggested_reply: str, customer_context: dict[str, Any], api_key: str) -> tuple[bool, str]:
     """
     Phase 3: Semantic Policy Grounding via JEV model.
     Checks if suggested reply contains unverified promises or coverage claims.
     """
-    import urllib.request
-    import json
 
     if not suggested_reply or not api_key:
         return True, ""
@@ -151,9 +152,9 @@ def verify_semantic_grounding_with_jev(suggested_reply: str, customer_context: D
             if choice == "no":
                 return False, "Semantic Grounding Failed: Suggested reply contains unverified coverage promises or policy contradictions."
             return True, ""
-    except Exception as e:
+    except (TimeoutError, urllib.error.URLError, json.JSONDecodeError) as e:
         # ADR-010/011: Any missing or errored verification defaults to REJECTED / human escalation.
         # Fail-CLOSED: JEV API failure is treated as inconclusive — route to human review,
         # do not silently pass the reply through.
-        return False, f"JEV Grounding inconclusive (API error: {str(e)}). Routed to human review per ADR-011."
+        return False, f"JEV Grounding inconclusive (API error: {e!s}). Routed to human review per ADR-011."
 
