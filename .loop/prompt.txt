@@ -18,3 +18,7 @@ The checker command exits 0 AND you print "DONE" as the final line.
 
 
 ## Last checker output
+api/guardrails.py:154:12: BLE001 Do not catch blind exception: `Exception`
+api/main.py:344:16: BLE001 Do not catch blind exception: `Exception`
+api/main.py:361:16: BLE001 Do not catch blind exception: `Exception`
+Found 3 errors.

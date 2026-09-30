@@ -1,9 +1,12 @@
-"""
+""""
 Deterministic Hallucination & Fact-Checking Guardrail Engine.
 Validates LLM-generated suggested replies against retrieved SQLite database context.
 """
 
+import json
 import re
+import urllib.error
+import urllib.request
 from typing import Any
 
 # Regex patterns for insurance domain entities (requires hyphen, underscore, or digit)
@@ -113,8 +116,6 @@ def verify_semantic_grounding_with_jev(suggested_reply: str, customer_context: d
     Phase 3: Semantic Policy Grounding via JEV model.
     Checks if suggested reply contains unverified promises or coverage claims.
     """
-    import json
-    import urllib.request
 
     if not suggested_reply or not api_key:
         return True, ""
@@ -151,7 +152,7 @@ def verify_semantic_grounding_with_jev(suggested_reply: str, customer_context: d
             if choice == "no":
                 return False, "Semantic Grounding Failed: Suggested reply contains unverified coverage promises or policy contradictions."
             return True, ""
-    except Exception as e:
+    except (TimeoutError, urllib.error.URLError, json.JSONDecodeError) as e:
         # ADR-010/011: Any missing or errored verification defaults to REJECTED / human escalation.
         # Fail-CLOSED: JEV API failure is treated as inconclusive — route to human review,
         # do not silently pass the reply through.

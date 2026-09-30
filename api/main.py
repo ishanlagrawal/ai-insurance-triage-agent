@@ -5,6 +5,7 @@ guardrail verification, execution logging, and enterprise dashboard.
 """
 
 import csv
+import imaplib
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -341,7 +342,7 @@ def log_triage_result(req: TriageLogRequest):
                 (req.message_id, req.sender, req.subject, datetime.now(timezone.utc).isoformat())
             )
             mark_gmail_read_by_msgid(req.message_id)
-        except Exception as pe_err:
+        except (imaplib.IMAP4.error, sqlite3.Error) as pe_err:
             print(f"Warning: Failed recording to processed_emails in log_triage_result: {pe_err}")
 
         conn.commit()
@@ -358,7 +359,7 @@ def log_triage_result(req: TriageLogRequest):
                     req.priority, req.urgency_score, req.sentiment, req.escalation_needed,
                     req.guardrail_status, req.approval_status, req.reply_status, timestamp
                 ])
-        except Exception as csv_err:
+        except (OSError, csv.Error) as csv_err:
             print(f"Warning: Failed to write to CSV: {csv_err}")
 
         return {"status": "logged", "id": row_id, "message_id": req.message_id}
