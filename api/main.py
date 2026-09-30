@@ -580,7 +580,7 @@ def dispatch_email(req: dict[str, Any]):
             server.login(user, pwd)
             server.sendmail(user, [to_email], msg.as_string())
             server.quit()
-        except sqlite3.Error as e:
+        except (smtplib.SMTPException, OSError) as e:
             raise HTTPException(status_code=500, detail=f"SMTP dispatch failed: {e!s}")
 
         # Update reply_status strictly upon verified SMTP transmission
@@ -618,7 +618,7 @@ def mark_gmail_read_by_msgid(message_id: str):
                 mail.store(mid, '+FLAGS', '\\Seen')
         mail.close()
         mail.logout()
-    except sqlite3.Error as e:
+    except (imaplib.IMAP4.error, OSError) as e:
         print(f"Error marking email read: {e}")
 
 @app.get("/api/v1/inbox/poll-unread")
@@ -722,7 +722,7 @@ def poll_unread_emails(limit: int = 5):
         mail.close()
         mail.logout()
         return {"count": len(results), "emails": results}
-    except sqlite3.Error as e:
+    except (imaplib.IMAP4.error, OSError) as e:
         raise HTTPException(status_code=500, detail=f"IMAP poll error: {e!s}")
 
 
